@@ -1,0 +1,8 @@
+services:
+  uiid-passkey-demo:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - UIID_BASE_URL=https://uiid.linkspreed.com
+      - NODE_TLS_REJECT_UNAUTHORIZED=0

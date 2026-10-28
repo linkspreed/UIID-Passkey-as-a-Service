@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UIID Passkey Test App</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 16px; }
+  input { padding: 8px; width: 280px; }
+  button { padding: 8px 14px; margin: 4px 4px 4px 0; cursor: pointer; }
+  #status { margin-top: 16px; font-weight: 600; }
+  pre { background: #111; color: #9f9; padding: 12px; overflow: auto; max-height: 420px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>UIID Passkey Test App</h1>
+<p>Username: <input id="username" value="jane.doe@example.com"></p>
+<button id="reg">Register passkey</button>
+<button id="login">Sign in with passkey</button>
+<button id="clear">Clear log</button>
+<div id="status"></div>
+<pre id="log"></pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = (label, obj) => { $("log").textContent += `\n=== ${label} ===\n` + JSON.stringify(obj, null, 2) + "\n"; };
+const status = (msg, ok) => { $("status").textContent = msg; $("status").style.color = ok ? "green" : "crimson"; };
+
+// base64 / base64url helpers
+function b64ToBuf(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  return Uint8Array.from(atob(s), c => c.charCodeAt(0)).buffer;
+}
+function bufToB64url(buf) {
+  if (!buf) return null;
+  let bin = "";
+  new Uint8Array(buf).forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function api(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await r.json();
+  log(`${path} (HTTP ${r.status})`, data);
+  if (!r.ok) throw new Error(data.error || data.message || `HTTP ${r.status}`);
+  return data;
+}
+
+// UIID may return { options: { publicKey: {...} } } or { options: {...} } or { publicKey: {...} }
+function extractPublicKey(data) {
+  const o = data.options || data;
+  return o.publicKey || o;
+}
+
+function prepCreate(pk) {
+  pk = structuredClone(pk);
+  pk.challenge = b64ToBuf(pk.challenge);
+  pk.user.id = b64ToBuf(pk.user.id);
+  (pk.excludeCredentials || []).forEach(c => c.id = b64ToBuf(c.id));
+  return pk;
+}
+function prepGet(pk) {
+  pk = structuredClone(pk);
+  pk.challenge = b64ToBuf(pk.challenge);
+  (pk.allowCredentials || []).forEach(c => c.id = b64ToBuf(c.id));
+  return pk;
+}
+
+function serializeCredential(cred) {
+  const r = cred.response;
+  const response = { clientDataJSON: bufToB64url(r.clientDataJSON) };
+  if (r.attestationObject) {
+    response.attestationObject = bufToB64url(r.attestationObject);
+    response.transports = r.getTransports ? r.getTransports() : [];
+  } else {
+    response.authenticatorData = bufToB64url(r.authenticatorData);
+    response.signature = bufToB64url(r.signature);
+    response.userHandle = bufToB64url(r.userHandle);
+  }
+  return {
+    id: cred.id,
+    rawId: bufToB64url(cred.rawId),
+    type: cred.type,
+    authenticatorAttachment: cred.authenticatorAttachment || null,
+    clientExtensionResults: cred.getClientExtensionResults(),
+    response,
+  };
+}
+
+$("reg").onclick = async () => {
+  const username = $("username").value.trim();
+  try {
+    status("Registering...", true);
+    const begin = await api("/api/register/begin", { username });
+    const publicKey = prepCreate(extractPublicKey(begin));
+    const cred = await navigator.credentials.create({ publicKey });
+    const credential = serializeCredential(cred);
+    log("Browser credential (create)", credential);
+    await api("/api/register/finish", { username, session_id: begin.session_id, credential });
+    status("Passkey registered successfully", true);
+  } catch (e) { status("Registration failed: " + e.message, false); log("Error", String(e)); }
+};
+
+$("login").onclick = async () => {
+  const username = $("username").value.trim();
+  try {
+    status("Signing in...", true);
+    const begin = await api("/api/login/begin", { username });
+    const publicKey = prepGet(extractPublicKey(begin));
+    const cred = await navigator.credentials.get({ publicKey });
+    const credential = serializeCredential(cred);
+    log("Browser credential (get)", credential);
+    await api("/api/login/finish", { username, session_id: begin.session_id, credential });
+    status("Signed in successfully", true);
+  } catch (e) { status("Sign-in failed: " + e.message, false); log("Error", String(e)); }
+};
+
+$("clear").onclick = () => { $("log").textContent = ""; $("status").textContent = ""; };
+</script>
+</body>
+</html>
