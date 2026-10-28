@@ -41,8 +41,8 @@ Configure your credentials and server endpoints using environment variables or a
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
-   cd passkey-test-repo
+   git clone https://github.com/linkspreed/UIID-Passkey-as-a-Service
+   cd UIID-Passkey-as-a-Service
    ```
 
 2. Start the server:
